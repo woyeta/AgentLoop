@@ -6,6 +6,7 @@ The app uses a 4-bit quantized model paired with a LoRA adapter trained on ToolA
 
 - **Base Model**: [google/gemma-4-E2B-it](https://huggingface.co/google/gemma-4-E2B-it)
 - **LoRA Adapter**: [woyeta/gemma-4-ToolAlpaca-FineTune-C](https://huggingface.co/woyeta/gemma-4-ToolAlpaca-FineTune-C)
+- **Tool Alpaca Dataset**: [github.com/tangqiaoyu/ToolAlpaca](https://github.com/tangqiaoyu/ToolAlpaca)
 
 ## Installation
 
