@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgentLoop</title>
+    <meta
+      name="description"
+      content="AI agent powered by finetuned Gemma 4 with ReAct reasoning loop"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}"
+    />
+    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <span class="section-label">Tool</span>
+          <div class="selected-tool-card" id="selectedToolCard" hidden>
+            <span class="selected-tool-name" id="selectedToolName"></span>
+            <span class="selected-tool-desc" id="selectedToolDesc"></span>
+          </div>
+        </div>
+        <div class="sidebar-tools no-scrollbar" id="toolCatalog">
+          <div class="tool-list-loading">Loading tools…</div>
+        </div>
+      </aside>
+
+      <main class="main-panel">
+        <header class="header-bar">
+          <div class="header-left">
+            <h1 class="header-title">Agent Loop</h1>
+            <span class="header-subtitle"
+              >Reasoning · Action · Observation</span
+            >
+          </div>
+          <div class="header-actions">
+            <button class="btn-reset" id="resetBtn" hidden>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="1 4 1 10 7 10" />
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+              </svg>
+              Reset
+            </button>
+            <button class="btn-run" id="runBtn" disabled>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <polygon points="6,3 20,12 6,21" />
+              </svg>
+              Run
+            </button>
+          </div>
+        </header>
+        <div class="main-body no-scrollbar">
+          <div class="prompt-section">
+            <span class="section-label">Prompt</span>
+            <textarea
+              class="prompt-input no-scrollbar"
+              id="promptInput"
+              rows="3"
+              placeholder="...Enter to run"
+            ></textarea>
+          </div>
+          <div class="output-section">
+            <div class="output-header">
+              <span class="section-label">Output</span>
+              <span class="status-indicator" id="statusIndicator"></span>
+            </div>
+            <div class="output-empty" id="outputEmpty">
+              <div class="output-empty-icon">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                >
+                  <polygon points="6,3 20,12 6,21" />
+                </svg>
+              </div>
+              <p>Run the agent to see its reasoning here</p>
+            </div>
+            <div class="trace-steps" id="traceSteps" hidden></div>
+            <div class="thinking-indicator" id="thinkingIndicator" hidden>
+              <span class="thinking-cursor"></span>
+              <span class="thinking-text">thinking…</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  </body>
+</html>

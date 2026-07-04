@@ -1,0 +1,12 @@
+flask
+torch
+transformers
+peft
+bitsandbytes
+accelerate
+sentencepiece
+protobuf
+huggingface_hub
+google-genai
+requests
+pyngrok
