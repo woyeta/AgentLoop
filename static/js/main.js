@@ -276,6 +276,7 @@ function renderStatusMessage(status) {
   const messages = {
     max_turns_reached: 'Agent reached maximum turns without a final answer',
     consecutive_errors: 'Agent encountered 3 consecutive errors',
+    loop_detected: 'Agent stopped after repeating the same tool call',
   };
 
   const card = document.createElement('div');
