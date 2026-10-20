@@ -76,7 +76,7 @@ def main():
     parser.add_argument("--configs", nargs="+", default=["base", "qlora"], choices=list(CONFIGS))
     parser.add_argument("--heldout", default=DEFAULT_HELDOUT)
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
-    parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--batch-size", type=int, default=8)
     args = parser.parse_args()
 

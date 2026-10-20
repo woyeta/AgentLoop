@@ -52,13 +52,13 @@ python -m evaluation.recovery_eval --configs base base_one_shot qlora
 python -m evaluation.report
 ```
 
-The frozen held-out set is [`evaluation/heldout.json`](evaluation/heldout.json) (rebuild with `python -m evaluation.build_heldout`). Results are written to `EVAL.md`.
+The frozen held-out set is [`evaluation/heldout.json`](evaluation/heldout.json) (rebuild with `python -m evaluation.build_heldout`). Results are in [`EVAL.md`](EVAL.md): on 186 tasks over 19 unseen tools, base Gemma selects the right tool 80.1% of the time zero-shot, and one error-feedback retry raises schema-valid calls from 80.1% to 86.0%. The current QLoRA adapter scores 36.0% because of the training issue below.
 
 ## Training
 
 [`notebooks/gemma_4_toolalpaca_finetune.ipynb`](notebooks/gemma_4_toolalpaca_finetune.ipynb): QLoRA (4-bit NF4, r=4, α=8, all linear layers), learning rate 5e-5 constant, 1 epoch, effective batch size 8, on all ToolAlpaca training instances (11,970 step examples, 80/20 train/validation split).
 
-Note: training used `max_length=256`, which is shorter than most prompts (system prompt plus tool docs), so the assistant output is often truncated out of the training window. Check with `python -m evaluation.truncation_check`.
+Known issue: training used `max_length=256`, but every training prompt (system prompt plus tool docs) is longer than that, so the assistant output was truncated out of the training window in all 500 sampled examples (`python -m evaluation.truncation_check`). The adapter never trained on a target token. A fix needs completion-only loss and `max_length` of about 2048 (the 95th-percentile example is 1,893 tokens).
 
 ## Tests
 
