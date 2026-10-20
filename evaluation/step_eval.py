@@ -51,8 +51,15 @@ def select_steps(heldout: dict, limit: int | None) -> list:
     return [s for s in steps if s["task_id"] in keep]
 
 
-def run_config(name: str, heldout: dict, steps: list, out_dir: str, max_new_tokens: int) -> None:
-    from model_loader import generate
+def batches(items: list, size: int, key) -> list:
+    """Groups items of similar prompt length so batches need little padding."""
+    ordered = sorted(items, key=key)
+    return [ordered[i:i + size] for i in range(0, len(ordered), size)]
+
+
+def run_config(name: str, heldout: dict, steps: list, out_dir: str, max_new_tokens: int,
+               batch_size: int = 1) -> None:
+    from model_loader import generate_batch
 
     config = CONFIGS[name]
     out_path = os.path.join(out_dir, f"step_{name}.jsonl")
@@ -60,31 +67,36 @@ def run_config(name: str, heldout: dict, steps: list, out_dir: str, max_new_toke
     todo = [s for s in steps if s["id"] not in done]
     print(f"[{name}] {len(done)} done, {len(todo)} to run")
 
-    with open(out_path, "a", encoding="utf-8") as out:
-        for i, example in enumerate(todo, 1):
-            tool = heldout["tools"][example["tool"]]
-            specs = build_function_specs(tool)
-            messages = build_messages(tool["NLDocumentation"], example["query"], example["history"],
-                                      one_shot=config["one_shot"])
-            generation = generate(messages, use_adapter=config["use_adapter"], max_new_tokens=max_new_tokens)
+    def messages_for(example):
+        tool = heldout["tools"][example["tool"]]
+        return build_messages(tool["NLDocumentation"], example["query"], example["history"],
+                              one_shot=config["one_shot"])
 
-            row = {
-                "id": example["id"],
-                "task_id": example["task_id"],
-                "source": example["source"],
-                "tool": example["tool"],
-                "step": example["step"],
-                "gold_path_len": example.get("gold_path_len", 1),
-                "config": name,
-                "raw": generation.text[:2000],
-                "n_tokens": generation.n_tokens,
-                "latency_ms": round(generation.latency_ms, 1),
-                **score_step(example, generation.text, specs),
-            }
-            out.write(json.dumps(row, ensure_ascii=False) + "\n")
+    finished = 0
+    with open(out_path, "a", encoding="utf-8") as out:
+        for batch in batches(todo, batch_size, key=lambda s: len(json.dumps(messages_for(s)))):
+            generations = generate_batch([messages_for(s) for s in batch],
+                                         use_adapter=config["use_adapter"], max_new_tokens=max_new_tokens)
+            for example, generation in zip(batch, generations):
+                specs = build_function_specs(heldout["tools"][example["tool"]])
+                row = {
+                    "id": example["id"],
+                    "task_id": example["task_id"],
+                    "source": example["source"],
+                    "tool": example["tool"],
+                    "step": example["step"],
+                    "gold_path_len": example.get("gold_path_len", 1),
+                    "config": name,
+                    "raw": generation.text[:2000],
+                    "n_tokens": generation.n_tokens,
+                    "latency_ms": round(generation.latency_ms, 1),
+                    "batch_size": len(batch),
+                    **score_step(example, generation.text, specs),
+                }
+                out.write(json.dumps(row, ensure_ascii=False) + "\n")
             out.flush()
-            if i % 25 == 0:
-                print(f"[{name}] {i}/{len(todo)}")
+            finished += len(batch)
+            print(f"[{name}] {finished}/{len(todo)}", flush=True)
 
 
 def main():
@@ -94,13 +106,14 @@ def main():
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
     parser.add_argument("--limit", type=int, default=None, help="evaluate only the first N tasks")
     parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=8)
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
     heldout = load_heldout(args.heldout)
     steps = select_steps(heldout, args.limit)
     for name in args.configs:
-        run_config(name, heldout, steps, args.out_dir, args.max_new_tokens)
+        run_config(name, heldout, steps, args.out_dir, args.max_new_tokens, args.batch_size)
 
 
 if __name__ == "__main__":

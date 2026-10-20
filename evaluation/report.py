@@ -130,7 +130,7 @@ def build_report(heldout: dict, out_dir: str) -> str:
         rows.append(row)
     rows.append(["Avg tokens generated / step"] +
                 [f"{_mean([r['n_tokens'] for r in results[c]]):.0f}" for c in configs])
-    rows.append(["Avg generation latency / step (s)"] +
+    rows.append(["Avg generation time / step, batched (s)"] +
                 [f"{_mean([r['latency_ms'] for r in results[c]]) / 1000:.2f}" for c in configs])
     parts += [_table(["Metric"] + [LABELS[c] for c in configs], rows), ""]
 

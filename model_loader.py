@@ -105,6 +105,44 @@ def generate(messages: list, use_adapter: bool = True, max_new_tokens: int = 512
     return Generation(response, int(new_tokens.shape[-1]), latency_ms)
 
 
+def generate_batch(messages_list: list, use_adapter: bool = True, max_new_tokens: int = 512) -> list:
+    """
+    Greedily generates responses for several prompts in one left-padded batch, which is
+    much faster than one prompt at a time on a small GPU. Latency is the batch time split
+    evenly across its prompts.
+    """
+    model, tokenizer = load_model()
+
+    texts = [
+        tokenizer.apply_chat_template(m, add_generation_prompt=True, tokenize=False)
+        for m in messages_list
+    ]
+    tokenizer.padding_side = "left"
+    encoded = tokenizer(texts, return_tensors="pt", padding=True, add_special_tokens=False).to(model.device)
+    prompt_len = encoded["input_ids"].shape[-1]
+    adapter_context = contextlib.nullcontext() if use_adapter else model.disable_adapter()
+
+    start = time.perf_counter()
+    with torch.no_grad(), adapter_context:
+        output_ids = model.generate(
+            **encoded,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id,
+        )
+    latency_ms = (time.perf_counter() - start) * 1000 / len(texts)
+
+    eos = model.generation_config.eos_token_id
+    stop_ids = {tokenizer.pad_token_id, tokenizer.eos_token_id, *(eos if isinstance(eos, list) else [eos])}
+    results = []
+    for row in output_ids[:, prompt_len:]:
+        tokens = row.tolist()
+        n_tokens = next((i for i, t in enumerate(tokens) if t in stop_ids), len(tokens))
+        text = tokenizer.decode(row, skip_special_tokens=True)
+        results.append(Generation(text, n_tokens, latency_ms))
+    return results
+
+
 def run_inference(
     user_query: str,
     tool_docs: str,
