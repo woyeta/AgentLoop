@@ -33,8 +33,13 @@ Desktop.ini
 *.safetensors
 *.gguf
 
-# ── Logs ──
+# ── Logs and traces ──
 *.log
+traces.db
+
+# ── Evaluation (raw downloads are pinned by sha256 in evaluation/heldout.json) ──
+evaluation/data/
+evaluation/results/
 
 # ── Jupyter ──
 .ipynb_checkpoints/

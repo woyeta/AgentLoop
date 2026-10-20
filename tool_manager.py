@@ -5,14 +5,23 @@ Handles tool discovery, validation, and simulated API executions.
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import requests
-from google import genai
-from prompts import DATA_DIR, GEMINI_MODEL, MAX_MOCK_RESPONSE_LENGTH, MOCK_API_PROMPT
+from json_utils import extract_json
+from prompts import (
+    DATA_DIR,
+    GEMINI_MODEL,
+    MAX_MOCK_RESPONSE_LENGTH,
+    MOCK_API_PROMPT,
+    TOOL_TIMEOUT_S,
+)
 
 logger = logging.getLogger(__name__)
 
 _public_apis_cache = None
 _train_data_cache = None
+_gemini_client = None
+_tool_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="tool")
 
 
 def _load_public_apis() -> dict:
@@ -167,24 +176,45 @@ def call_mock_api(
     )
 
     try:
-        api_key = os.environ.get("GEMINI_API_KEY", "")
-        if not api_key:
+        client = _get_gemini_client()
+        if client is None:
             return (False, "GEMINI_API_KEY not set")
 
-        client = genai.Client(api_key=api_key)
+        from google.genai import types
+
         response = client.models.generate_content(
-            model=GEMINI_MODEL, contents=api_prompt
+            model=GEMINI_MODEL,
+            contents=api_prompt,
+            config=types.GenerateContentConfig(temperature=0),
         )
-        return (True, response.text[:MAX_MOCK_RESPONSE_LENGTH])
+        return (True, (response.text or "")[:MAX_MOCK_RESPONSE_LENGTH])
     except Exception as err:
         logger.error(f"Gemini mock API failed: {err}")
         return (False, str(err))
 
 
+def _get_gemini_client():
+    """Returns a shared Gemini client, or None if no API key is configured."""
+    global _gemini_client
+    if _gemini_client is None:
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            return None
+        from google import genai
+        _gemini_client = genai.Client(api_key=api_key)
+    return _gemini_client
+
+
+def is_error_response(response_text: str) -> bool:
+    """Detects error bodies returned by the (mock) API, e.g. {"error": "400 Bad Request"}."""
+    body = extract_json(response_text) if isinstance(response_text, str) else None
+    return isinstance(body, dict) and bool(body.get("error"))
+
+
 def execute_tool_action(
-    tool_info: dict, action: str, action_input: dict
+    tool_info: dict, action: str, action_input: dict, timeout_s: float = TOOL_TIMEOUT_S
 ) -> tuple[bool, str]:
-    """Executes a tool action."""
+    """Executes a tool action with a timeout and treats API error bodies as failures."""
     action_projection = tool_info.get("Function_Projection", {}).get(action, [])
     if not action_projection:
         return (False, f"Action '{action}' not found in tool")
@@ -192,4 +222,13 @@ def execute_tool_action(
     endpoint, method = action_projection
 
     logger.info(f"Using Gemini mock API for {action}")
-    return call_mock_api(tool_info, endpoint, method, action_input)
+    future = _tool_executor.submit(call_mock_api, tool_info, endpoint, method, action_input)
+    try:
+        ok, response = future.result(timeout=timeout_s)
+    except FutureTimeoutError:
+        future.cancel()
+        return (False, f"Tool call timed out after {timeout_s}s")
+
+    if ok and is_error_response(response):
+        return (False, response)
+    return (ok, response)

@@ -62,29 +62,49 @@ Inputs: {REQUEST_INPUTS}
 
 RESPONSE:"""
 
+ONE_SHOT_EXAMPLE = """EXAMPLE (for an unrelated tool with a getForecast function):
+Query: What will the weather be in Paris tomorrow?
+History: []
+Response: {"thought": "I need tomorrow's forecast for Paris.", "action": "getForecast", "action_input": {"city": "Paris", "days": 1}}
+
+Query: What will the weather be in Paris tomorrow?
+History: [{"action": "getForecast", "action_input": "{\\"city\\": \\"Paris\\", \\"days\\": 1}", "observation": "{\\"forecast\\": [{\\"day\\": 1, \\"condition\\": \\"Sunny\\", \\"high_c\\": 24}]}"}]
+Response: {"thought": "I have the forecast and can answer.", "final_answer": "Tomorrow in Paris will be sunny with a high of 24°C."}"""
+
+# Error observations are returned to the model in the history, so they use plain
+# braces (they are never passed through str.format unless they have a placeholder).
 ERR_MSG_INVALID_JSON = (
-    'ERROR: Invalid JSON response was generated. Use this STRICT format for reasoning '
+    'Error: Invalid JSON response was generated. Use this STRICT format for reasoning '
     '— output a JSON block:\n'
-    '{{"thought": "...", "action": "...", "action_input": {{"key": "value"}}}}\n\n'
+    '{"thought": "...", "action": "...", "action_input": {"key": "value"}}\n\n'
     'If you have enough information, output a final JSON block:\n'
-    '{{"thought": "...", "final_answer": "..."}}'
+    '{"thought": "...", "final_answer": "..."}'
 )
 
 ERR_MSG_NO_ACTION = (
-    'ERROR: No action was found. Use this STRICT format for reasoning '
+    'Error: No action was found. Use this STRICT format for reasoning '
     '— output a JSON block:\n'
-    '{{"thought": "...", "action": "...", "action_input": {{"key": "value"}}}}\n\n'
+    '{"thought": "...", "action": "...", "action_input": {"key": "value"}}\n\n'
     'If you have enough information, output a final JSON block:\n'
-    '{{"thought": "...", "final_answer": "..."}}'
+    '{"thought": "...", "final_answer": "..."}'
 )
 
 ERR_MSG_INVALID_ACTION = (
-    "ERROR: Invalid action. The action value must exactly match a name from the "
+    "Error: Invalid action. The action value must exactly match a name from the "
     "following [{tool_functions_list}]"
 )
 
+ERR_MSG_INVALID_ARGS = (
+    "Error: Invalid action_input for {action}: {details}. Fix the arguments and call the tool again."
+)
+
+ERR_MSG_REPEATED_CALL = (
+    "Error: {action} was already called with these exact arguments. "
+    "Use the previous observation or give the final answer."
+)
+
 ERR_MSG_API_FAIL = (
-    "ERROR: API call failed or returned an invalid response. Details: {api_response}"
+    "Error: API call failed or returned an invalid response. Details: {api_response}"
 )
 
 BASE_MODEL = "google/gemma-4-E2B-it"
@@ -92,3 +112,6 @@ ADAPTER_REPO = "woyeta/gemma-4-ToolAlpaca-FineTune-C"
 GEMINI_MODEL = "gemini-3.1-flash-lite"
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 MAX_MOCK_RESPONSE_LENGTH = 500
+MAX_TURNS_LIMIT = 8
+MAX_CONSECUTIVE_ERRORS = 3
+TOOL_TIMEOUT_S = 20

@@ -10,3 +10,5 @@ huggingface_hub
 google-genai
 requests
 pyngrok
+pydantic>=2.6
+pytest

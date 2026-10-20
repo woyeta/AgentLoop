@@ -2,19 +2,28 @@
 Loads and runs inference with the language model.
 """
 
-import json
+import contextlib
 import logging
 import threading
+import time
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import PeftModel
-from prompts import SYSTEM_PROMPT, BASE_MODEL, ADAPTER_REPO
+from agent_format import Generation, build_messages
+from prompts import BASE_MODEL, ADAPTER_REPO
 
 logger = logging.getLogger(__name__)
 
 _model = None
 _tokenizer = None
 _lock = threading.Lock()
+
+
+def _compute_dtype():
+    """bf16 where the GPU supports it (A100/L4), fp16 otherwise (e.g. T4)."""
+    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        return torch.bfloat16
+    return torch.float16
 
 
 def load_model():
@@ -30,13 +39,14 @@ def load_model():
         if _model is not None:
             return _model, _tokenizer
 
-        logger.info(f"Loading base model: {BASE_MODEL}")
+        dtype = _compute_dtype()
+        logger.info(f"Loading base model: {BASE_MODEL} (compute dtype {dtype})")
 
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_compute_dtype=dtype,
         )
 
         base_model = AutoModelForCausalLM.from_pretrained(
@@ -44,7 +54,7 @@ def load_model():
             quantization_config=bnb_config,
             device_map="auto",
             trust_remote_code=True,
-            dtype=torch.bfloat16,
+            dtype=dtype,
         )
 
         logger.info(f"Loading LoRA adapter: {ADAPTER_REPO}")
@@ -57,27 +67,12 @@ def load_model():
         return _model, _tokenizer
 
 
-def run_inference(
-    user_query: str,
-    tool_docs: str,
-    history: list = None,
-    max_new_tokens: int = 512
-) -> str:
+def generate(messages: list, use_adapter: bool = True, max_new_tokens: int = 512) -> Generation:
     """
-    Generates a text response from the model based on the query and tool specifications.
+    Greedily generates a response for chat messages. With `use_adapter=False` the LoRA
+    adapter is disabled, giving the base model's output from the same loaded weights.
     """
-    if history is None:
-        history = []
-
     model, tokenizer = load_model()
-
-    system_text = SYSTEM_PROMPT.format(tool_docs=tool_docs.strip())
-    user_text = f"Information: {json.dumps(history)}\nQuery: {user_query.strip()}"
-
-    messages = [
-        {"role": "system", "content": system_text},
-        {"role": "user", "content": user_text},
-    ]
 
     encoded = tokenizer.apply_chat_template(
         messages,
@@ -92,15 +87,70 @@ def run_inference(
         input_ids = encoded.to(model.device)
 
     prompt_len = input_ids.shape[-1]
+    adapter_context = contextlib.nullcontext() if use_adapter else model.disable_adapter()
 
-    with torch.no_grad():
+    start = time.perf_counter()
+    with torch.no_grad(), adapter_context:
         output_ids = model.generate(
             input_ids,
+            attention_mask=torch.ones_like(input_ids),
             max_new_tokens=max_new_tokens,
             do_sample=False,
             pad_token_id=tokenizer.eos_token_id,
         )
+    latency_ms = (time.perf_counter() - start) * 1000
 
     new_tokens = output_ids[0][prompt_len:]
     response = tokenizer.decode(new_tokens, skip_special_tokens=True)
-    return response
+    return Generation(response, int(new_tokens.shape[-1]), latency_ms)
+
+
+def generate_batch(messages_list: list, use_adapter: bool = True, max_new_tokens: int = 512) -> list:
+    """
+    Greedily generates responses for several prompts in one left-padded batch, which is
+    much faster than one prompt at a time on a small GPU. Latency is the batch time split
+    evenly across its prompts.
+    """
+    model, tokenizer = load_model()
+
+    texts = [
+        tokenizer.apply_chat_template(m, add_generation_prompt=True, tokenize=False)
+        for m in messages_list
+    ]
+    tokenizer.padding_side = "left"
+    encoded = tokenizer(texts, return_tensors="pt", padding=True, add_special_tokens=False).to(model.device)
+    prompt_len = encoded["input_ids"].shape[-1]
+    adapter_context = contextlib.nullcontext() if use_adapter else model.disable_adapter()
+
+    start = time.perf_counter()
+    with torch.no_grad(), adapter_context:
+        output_ids = model.generate(
+            **encoded,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id,
+        )
+    latency_ms = (time.perf_counter() - start) * 1000 / len(texts)
+
+    eos = model.generation_config.eos_token_id
+    stop_ids = {tokenizer.pad_token_id, tokenizer.eos_token_id, *(eos if isinstance(eos, list) else [eos])}
+    results = []
+    for row in output_ids[:, prompt_len:]:
+        tokens = row.tolist()
+        n_tokens = next((i for i, t in enumerate(tokens) if t in stop_ids), len(tokens))
+        text = tokenizer.decode(row, skip_special_tokens=True)
+        results.append(Generation(text, n_tokens, latency_ms))
+    return results
+
+
+def run_inference(
+    user_query: str,
+    tool_docs: str,
+    history: list = None,
+    max_new_tokens: int = 512
+) -> Generation:
+    """
+    Generates a response from the model based on the query and tool specifications.
+    """
+    messages = build_messages(tool_docs, user_query, history or [])
+    return generate(messages, max_new_tokens=max_new_tokens)
