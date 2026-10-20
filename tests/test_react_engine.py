@@ -66,6 +66,15 @@ def test_unknown_function_is_rejected(httpbin):
     assert result["status"] == "success"
 
 
+def test_object_action_is_rejected_not_crashing(httpbin):
+    # Seen from the QLoRA model: the action is an object instead of a function name.
+    bad = json.dumps({"thought": "t", "action": {"toolName": "getClientRequestData"}, "action_input": {}})
+    generate = scripted([bad, FINAL])
+    result = react_loop("q", httpbin, generate=generate, execute=ok_execute)
+    assert result["status"] == "success"
+    assert "Invalid action" in generate.calls[1][0]["observation"]
+
+
 def test_repeated_call_is_nudged_then_stopped(httpbin):
     same = call("getClientRequestData", url="https://httpbin.org/get")
     generate = scripted([same, same, same])

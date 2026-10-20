@@ -2,6 +2,7 @@
 Executes the reasoning and action loop.
 """
 
+import json
 import logging
 import time
 from agent_format import Generation, history_entry
@@ -33,6 +34,14 @@ def _build_result(final_answer, steps, turns_used, status, run_id=None) -> dict:
     }
 
 
+def _action_name(json_response: dict) -> str:
+    """Returns the action as a string; non-string actions (e.g. an object) become their JSON text."""
+    action = json_response.get("action", "")
+    if action and not isinstance(action, str):
+        return json.dumps(action)
+    return action or ""
+
+
 def error_feedback(json_response, function_specs: dict) -> dict | None:
     """
     Returns the history entry the loop adds for a call it rejects before execution
@@ -45,7 +54,7 @@ def error_feedback(json_response, function_specs: dict) -> dict | None:
     if json_response.get("final_answer", ""):
         return None
 
-    action = json_response.get("action", "")
+    action = _action_name(json_response)
     action_input = json_response.get("action_input", {})
     if not action:
         return history_entry("", action_input, ERR_MSG_NO_ACTION)
@@ -158,7 +167,7 @@ def react_loop(
             }, **timing)
             return finish(final_answer, turn_num, "success")
 
-        action = json_response.get("action", "")
+        action = _action_name(json_response)
         action_input = json_response.get("action_input", {})
 
         if not action:
